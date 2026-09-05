@@ -1,0 +1,174 @@
+:root {
+  --primary: #7a1f3d;
+  --primary-dark: #5a1730;
+  --bg: #f6f3f0;
+  --panel: #ffffff;
+  --border: #ddd3ce;
+  --text: #2b2320;
+  --muted: #8a7d76;
+  font-family: "Segoe UI", Roboto, -apple-system, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body, html, #root {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app-shell {
+  display: flex;
+  height: 100vh;
+}
+
+.sidebar {
+  width: 210px;
+  background: var(--primary-dark);
+  color: white;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 0;
+}
+
+.brand { padding: 0 16px 16px; border-bottom: 1px solid rgba(255,255,255,0.15); margin-bottom: 12px; }
+.brand-title { font-weight: 700; font-size: 15px; letter-spacing: 0.5px; }
+.brand-sub { font-size: 12px; opacity: 0.75; margin-top: 2px; }
+
+.nav-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: white;
+  padding: 10px 16px;
+  font-size: 14px;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.nav-btn:hover { background: rgba(255,255,255,0.08); opacity: 1; }
+.nav-btn.active { background: var(--primary); opacity: 1; font-weight: 600; }
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 28px;
+}
+
+h1 { font-size: 20px; margin: 0 0 16px; }
+h2 { font-size: 15px; margin: 20px 0 8px; color: var(--primary-dark); }
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.grid {
+  display: grid;
+  gap: 10px;
+}
+.grid-2 { grid-template-columns: 1fr 1fr; }
+.grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+.grid-4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
+
+label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+
+input, select, textarea {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 13px;
+  background: white;
+  color: var(--text);
+}
+input:focus, select:focus, textarea:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: -1px;
+}
+
+button.primary {
+  background: var(--primary);
+  color: white;
+  border: none;
+  padding: 9px 18px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+button.primary:hover { background: var(--primary-dark); }
+button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+button.secondary {
+  background: white;
+  color: var(--primary-dark);
+  border: 1px solid var(--primary-dark);
+  padding: 7px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+button.icon-btn {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+}
+button.icon-btn:hover { color: var(--primary); }
+
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+th, td { border: 1px solid var(--border); padding: 6px 8px; text-align: left; }
+th { background: #f1e9e4; font-weight: 600; }
+
+.items-table input, .items-table select { font-size: 12.5px; padding: 4px 6px; }
+
+.totals-box {
+  margin-top: 12px;
+  margin-left: auto;
+  width: 280px;
+  background: #faf6f3;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+}
+.totals-row { display: flex; justify-content: space-between; font-size: 13px; padding: 3px 0; }
+.totals-row.grand { font-weight: 700; font-size: 15px; border-top: 1px solid var(--border); margin-top: 6px; padding-top: 8px; color: var(--primary-dark); }
+
+.words-box {
+  margin-top: 10px;
+  font-size: 12.5px;
+  font-style: italic;
+  color: var(--muted);
+}
+
+.toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; }
+
+.error-banner {
+  background: #fdecea;
+  border: 1px solid #f5c2be;
+  color: #8a2c22;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.success-banner {
+  background: #e9f7ee;
+  border: 1px solid #b7e3c7;
+  color: #1e6b3d;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.muted-note { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
