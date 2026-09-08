@@ -39,6 +39,20 @@ export const addSupplier = (input) => invoke("add_supplier", { input });
 export const updateSupplier = (supplierId, input) => invoke("update_supplier", { supplierId, input });
 export const deleteSupplier = (supplierId) => invoke("delete_supplier", { supplierId });
 
+// ---- Invoices (Phase 1, read-only against vm_billentry/vm_billitems) ----
+export const findBillByNumber = (billNumber) => invoke("find_bill_by_number", { billNumber });
+export const getInvoiceData = (billId) => invoke("get_invoice_data", { billId });
+
+// ---- Billing / POS checkout (Phase 1, writes vm_billentry/vm_billitems) ----
+export const billingInit = () => invoke("billing_init");
+export const checkout = (input) => invoke("checkout", { input });
+
+// ---- Accounts: Vouchers / Ledger / Daybook (Phase 2) ----
+export const accountsInit = () => invoke("accounts_init");
+export const addVoucher = (input) => invoke("add_voucher", { input });
+export const listLedger = (dateFrom, dateTo) => invoke("list_ledger", { dateFrom, dateTo });
+export const listDaybook = (dateFrom, dateTo) => invoke("list_daybook", { dateFrom, dateTo });
+
 // ---- Native folder picker (for Settings > PDF output folder) ----
 export const pickFolder = async () => {
   const selected = await openDialog({ directory: true, multiple: false });

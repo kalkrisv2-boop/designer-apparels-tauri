@@ -24,16 +24,14 @@
 //!   3. This module only writes the bill; nothing here calls a PDF
 //!      generator.
 //!
-//! NOT yet wired here: Ledger/Daybook auto-posting
-//! (`post_ledger_entry`/`post_daybook_entry` in Python's billing.py).
-//! That's Phase 2 (Accounts: Vouchers/Ledger/Daybook) per the roadmap
-//! -- those tables and their posting functions don't exist on the Rust
-//! side yet. Customer balance IS updated here (vm_customer.cs_balance,
-//! same table customers.rs already owns), since that's plain Phase 1
-//! scope, not an Accounts-module concern. A bill's credit portion is
-//! therefore tracked on the customer record correctly even before
-//! Phase 2 exists; only the Ledger/Daybook mirror of that entry is
-//! deferred.
+//! Phase 2 update: Ledger/Daybook auto-posting IS now wired here
+//! (`accounts::post_ledger_entry`/`accounts::post_daybook_entry`,
+//! called inside this module's own `tx` so it's atomic with the bill
+//! itself) -- matches Python's billing.py exactly: the paid portion of
+//! a sale posts to the books the same as a manual Receipt voucher would,
+//! while the unpaid portion (if any) still just updates
+//! vm_customer.cs_balance directly, same as Phase 1. See accounts.rs's
+//! module doc for the full Ledger/Daybook/Vouchers design.
 
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -501,8 +499,45 @@ pub fn checkout(db: State<PlatformDb>, session: State<SessionState>, input: Chec
         }
     }
 
-    // Customer balance update (Phase 1 scope). Ledger/Daybook mirror of
-    // this sale is Phase 2 (Accounts) -- see module doc.
+    // Customer balance update (Phase 1 scope) + Ledger/Daybook auto-post
+    // (Phase 2 -- see accounts.rs). Order matches Python's billing.py:
+    // post the paid portion first, then adjust the credit portion.
+    let resolved_customer_name = if input.customer_name.trim().is_empty() {
+        "Walk-in Customer"
+    } else {
+        input.customer_name.trim()
+    };
+
+    if input.paid_amount > 0.001 {
+        // Only "Cash" itself routes to the Cash ledger; every other
+        // payment method (Card, UPI, Bank Transfer, or anything added
+        // later) routes to Bank -- matches Python's billing.py comment
+        // on why this is an "everything else" check, not an allowlist.
+        let ledger_mode = if input.pay_method.trim() == "Cash" { "Cash" } else { "Bank" };
+        let bill_date = &now[..10];
+        let particulars = format!("Sale Bill #{bill_number} -- {resolved_customer_name}");
+        crate::accounts::post_ledger_entry(
+            &tx,
+            admin,
+            &particulars,
+            input.paid_amount,
+            bill_date,
+            "income",
+            ledger_mode,
+            &input.customer_id.map(|c| c.to_string()).unwrap_or_default(),
+            resolved_customer_name,
+        )?;
+        crate::accounts::post_daybook_entry(
+            &tx,
+            admin,
+            bill_date,
+            ledger_mode,
+            "Sales",
+            input.paid_amount,
+            &particulars,
+        )?;
+    }
+
     if balance > 0.001 {
         if let Some(cid) = input.customer_id {
             tx.execute(

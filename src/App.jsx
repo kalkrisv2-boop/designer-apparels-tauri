@@ -2,6 +2,8 @@ import React, { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import Billing from "./pages/Billing.jsx";
 import History from "./pages/History.jsx";
+import InvoicePrint from "./pages/InvoicePrint.jsx";
+import Accounts from "./pages/Accounts.jsx";
 import Items from "./pages/Items.jsx";
 import Products from "./pages/Products.jsx";
 import Customers from "./pages/Customers.jsx";
@@ -28,6 +30,7 @@ export default function App() {
   const [multiShopEnabled, setMultiShopEnabled] = useState(false);
   const [session, setSession] = useState(null);
   const [tab, setTab] = useState("dashboard");
+  const [printBillNumber, setPrintBillNumber] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -116,8 +119,22 @@ export default function App() {
             <DashboardHome key={session.active_shop_id} />
           ) : (
             <>
-              {tab === "billing" && <Billing />}
+              {tab === "billing" && (
+                <Billing
+                  onCheckoutSuccess={(billNumber) => {
+                    setPrintBillNumber(billNumber);
+                    setTab("invoice-print");
+                  }}
+                />
+              )}
               {tab === "history" && <History />}
+              {tab === "invoice-print" && (
+                <InvoicePrint
+                  initialBillNumber={printBillNumber}
+                  onConsumeInitial={() => setPrintBillNumber(null)}
+                />
+              )}
+              {tab === "accounts" && <Accounts />}
               {tab === "items" && <Items />}
               {tab === "products" && <Products />}
               {tab === "customers" && <Customers />}

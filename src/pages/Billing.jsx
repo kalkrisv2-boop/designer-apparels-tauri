@@ -1,194 +1,379 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  createInvoice,
-  listCatalogItems,
-  openFile,
+  billingInit,
+  checkout,
+  searchProducts,
+  styleVariants,
+  quickAddProduct,
+  addCustomer,
   INDIAN_STATES,
-  GST_RATES,
 } from "../api.js";
 
-const COMPANY_STATE_CODE = "32"; // Kerala — Designer Apparels' home state
+// POS checkout screen, rewritten against the Phase 1 platform schema
+// (billing::checkout -> vm_billentry/vm_billitems), replacing the old
+// single-tenant invoice-form version of this file. See
+// PHASE_1_HANDOFF.md §2 for the three locked decisions this UI has to
+// respect:
+//   #1 GST type is auto-derived from buyer vs shop state, but the
+//      cashier can override per bill (gstTypeOverride below).
+//   #2 Per-line GST mode (exclusive/inclusive) is a real per-line
+//      choice here, carried over from the old single-tenant app --
+//      Python's billing.py has no such concept.
+//   #7 Barcode printing (print-barcode-btn, bulk label sheet, reprint-
+//      barcode-on-bill) is Phase 2 scope -- omitted entirely, not
+//      stubbed, matching how Products.jsx already left it out.
+//
+// Client-side totals below are a *preview* only (same formulas as
+// billing::checkout, round2 not integer round-off -- checkout has no
+// round-off step, unlike the old create_invoice pipeline). The server
+// is the source of truth; this just avoids a round-trip per keystroke.
 
-function emptyLine(sr) {
-  return {
-    sr,
-    description: "",
-    hsn_sac: "6212",
-    size_ratio: "",
-    qty: 1,
-    rate: 0,
-    gst_rate: 5,
-    gst_mode: "exclusive",
-    amount: 0,
-  };
+const GST_RATES = [0, 5, 12, 18, 28];
+const DEFAULT_GST_PCT = 5;
+
+function round2(v) {
+  return Math.round((Number(v) || 0) * 100) / 100;
 }
 
-function todayDdMmYyyy() {
-  const d = new Date();
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  return `${dd}/${mm}/${d.getFullYear()}`;
-}
-
-// Parses a Size/Ratio string into its total quantity.
-// Each comma-separated segment can be "BAND/QTY" (e.g. "32/12") or
-// "CUP/BAND/QTY" (e.g. "A/32/6", "D/36/12") — the quantity is always the
-// last slash-separated value. Returns null if no segment yields a valid
-// number (e.g. the field is empty or still mid-typing).
-function sumQtyFromSizeRatio(str) {
-  if (!str || !str.trim()) return null;
-  const segments = str.split(",");
-  let total = 0;
-  let sawValid = false;
-  for (const seg of segments) {
-    const trimmed = seg.trim();
-    if (!trimmed) continue;
-    const parts = trimmed.split("/");
-    const qtyPart = parts[parts.length - 1].trim();
-    const qty = parseFloat(qtyPart);
-    if (!isNaN(qty)) {
-      total += qty;
-      sawValid = true;
-    }
+function calcLine(l) {
+  const preNet = (Number(l.qty) || 0) * (Number(l.price) || 0);
+  const discountAmt = preNet * ((Number(l.discount_pct) || 0) / 100);
+  let taxable = preNet - discountAmt;
+  let gstAmt;
+  if (l.gst_mode === "inclusive") {
+    const t = taxable / (1 + (Number(l.gst_pct) || 0) / 100);
+    gstAmt = taxable - t;
+    taxable = t;
+  } else {
+    gstAmt = taxable * ((Number(l.gst_pct) || 0) / 100);
   }
-  return sawValid ? total : null;
+  return { taxable, gstAmt, lineTotal: taxable + gstAmt };
 }
 
-export default function Billing() {
-  const [catalog, setCatalog] = useState([]);
-  const [header, setHeader] = useState({
-    invoice_date: todayDdMmYyyy(),
-    buyer_name: "",
-    buyer_address: "",
-    buyer_gstin: "",
-    buyer_state: "Kerala",
-    buyer_state_code: COMPANY_STATE_CODE,
-    transport_name: "",
-    salesman: "",
-  });
-  const [lines, setLines] = useState([emptyLine(1)]);
-  const [saving, setSaving] = useState(false);
+let cartKeySeq = 1;
+
+export default function Billing({ onCheckoutSuccess }) {
+  const [init, setInit] = useState(null);
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  const [success, setSuccess] = useState(null);
+
+  const [billMode, setBillMode] = useState("retail");
+
+  // Customer / buyer
+  const [customerId, setCustomerId] = useState(null);
+  const [customerQuery, setCustomerQuery] = useState("");
+  const [customerName, setCustomerName] = useState("");
+  const [customerMobile, setCustomerMobile] = useState("");
+  const [customerGstin, setCustomerGstin] = useState("");
+  const [customerPan, setCustomerPan] = useState("");
+  const [buyerStateCode, setBuyerStateCode] = useState("");
+  const [gstTypeOverride, setGstTypeOverride] = useState("auto"); // "auto" | "intra" | "inter"
+
+  // Bill meta
+  const [payMethod, setPayMethod] = useState("Cash");
+  const [paidAmount, setPaidAmount] = useState("");
+  const [overallDiscount, setOverallDiscount] = useState(0);
+  const [note, setNote] = useState("");
+  const [transportName, setTransportName] = useState("");
+  const [lrNumber, setLrNumber] = useState("");
+  const [lrDate, setLrDate] = useState("");
+  const [parcels, setParcels] = useState("");
+  const [salesman, setSalesman] = useState("");
+  const [booking, setBooking] = useState("");
+
+  // Cart
+  const [cart, setCart] = useState([]);
+
+  // Product search (retail + a-la-carte in wholesale mode)
+  const [productQuery, setProductQuery] = useState("");
+  const [productResults, setProductResults] = useState([]);
+
+  // Style-variant "add whole size-ratio" flow (wholesale only)
+  const [styleQuery, setStyleQuery] = useState("");
+  const [styleMatches, setStyleMatches] = useState([]);
+  const [selectedModel, setSelectedModel] = useState("");
+  const [variants, setVariants] = useState([]);
+  const [variantQtys, setVariantQtys] = useState({});
+
+  // Quick-add product (retail only -- see decision note in module doc)
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [quickAddForm, setQuickAddForm] = useState({ productname: "", hsn: "", unit: "pcs", saleprice: "" });
+
+  // Inline new-customer
+  const [newCustomerOpen, setNewCustomerOpen] = useState(false);
+  const [newCustomerForm, setNewCustomerForm] = useState({ customername: "", phone: "", address: "", email: "", tin: "" });
+
+  const [saving, setSaving] = useState(false);
+
+  const refreshInit = () => billingInit().then(setInit).catch((e) => setError(String(e)));
 
   useEffect(() => {
-    listCatalogItems().then(setCatalog).catch(() => {});
+    refreshInit();
   }, []);
 
-  const isInterstate = header.buyer_state_code.trim() !== COMPANY_STATE_CODE;
+  // --- Product search (debounced) ---
+  useEffect(() => {
+    if (!productQuery.trim()) {
+      setProductResults([]);
+      return;
+    }
+    const t = setTimeout(() => {
+      searchProducts(productQuery).then(setProductResults).catch(() => setProductResults([]));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [productQuery]);
 
-  const computedLines = useMemo(() => {
-    return lines.map((l) => {
-      const gross = (Number(l.qty) || 0) * (Number(l.rate) || 0);
-      let taxable, tax;
-      if (l.gst_mode === "inclusive") {
-        taxable = gross / (1 + (Number(l.gst_rate) || 0) / 100);
-        tax = gross - taxable;
-      } else {
-        taxable = gross;
-        tax = gross * ((Number(l.gst_rate) || 0) / 100);
-      }
-      return { ...l, _taxable: taxable, _tax: tax };
-    });
-  }, [lines]);
+  // --- Style search (debounced, wholesale only) ---
+  useEffect(() => {
+    if (billMode !== "wholesale" || !styleQuery.trim()) {
+      setStyleMatches([]);
+      return;
+    }
+    const t = setTimeout(() => {
+      searchProducts(styleQuery).then((results) => {
+        const seen = new Set();
+        const models = [];
+        for (const p of results) {
+          if (p.pr_model && !seen.has(p.pr_model)) {
+            seen.add(p.pr_model);
+            models.push(p.pr_model);
+          }
+        }
+        setStyleMatches(models);
+      }).catch(() => setStyleMatches([]));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [styleQuery, billMode]);
+
+  const pickModel = (model) => {
+    setSelectedModel(model);
+    setVariantQtys({});
+    styleVariants(model).then(setVariants).catch(() => setVariants([]));
+  };
+
+  const priceFor = (product) => {
+    if (billMode === "wholesale") {
+      const w = parseFloat(product.pr_wholesale);
+      return isNaN(w) ? 0 : w;
+    }
+    return product.pr_saleprice;
+  };
+
+  const addProductToCart = (product, qty = 1) => {
+    setCart((prev) => [
+      ...prev,
+      {
+        key: cartKeySeq++,
+        product_id: product.pr_productid,
+        name: product.pr_productname,
+        model: product.pr_model,
+        cupsize: product.pr_cupsize,
+        size: product.pr_size,
+        unit: product.pr_unit,
+        stock: product.pr_stock,
+        price: priceFor(product),
+        qty,
+        discount_pct: 0,
+        gst_pct: DEFAULT_GST_PCT,
+        gst_mode: "exclusive",
+      },
+    ]);
+  };
+
+  const addSelectedVariants = () => {
+    const toAdd = variants.filter((v) => Number(variantQtys[v.pr_productid]) > 0);
+    if (toAdd.length === 0) return;
+    setCart((prev) => [
+      ...prev,
+      ...toAdd.map((v) => ({
+        key: cartKeySeq++,
+        product_id: v.pr_productid,
+        name: v.pr_productname,
+        model: v.pr_model,
+        cupsize: v.pr_cupsize,
+        size: v.pr_size,
+        unit: v.pr_unit,
+        stock: v.pr_stock,
+        price: priceFor(v),
+        qty: Number(variantQtys[v.pr_productid]),
+        discount_pct: 0,
+        gst_pct: DEFAULT_GST_PCT,
+        gst_mode: "exclusive",
+      })),
+    ]);
+    setVariantQtys({});
+  };
+
+  const updateCartLine = (key, patch) => {
+    setCart((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  };
+
+  const removeCartLine = (key) => setCart((prev) => prev.filter((l) => l.key !== key));
+
+  const switchBillMode = (mode) => {
+    if (mode === billMode) return;
+    if (cart.length > 0) {
+      const ok = window.confirm(
+        "Switching between Retail and Wholesale clears the cart (prices differ between the two modes). Continue?"
+      );
+      if (!ok) return;
+    }
+    setBillMode(mode);
+    setCart([]);
+    setSelectedModel("");
+    setVariants([]);
+    setVariantQtys({});
+  };
+
+  const pickCustomer = (c) => {
+    setCustomerId(c.cs_customerid);
+    setCustomerQuery(c.cs_customername);
+    setCustomerName(c.cs_customername);
+    setCustomerMobile(c.cs_customerphone);
+    setCustomerGstin(c.cs_tin_number);
+    setBuyerStateCode(c.cs_statecode || "");
+  };
+
+  const clearCustomer = () => {
+    setCustomerId(null);
+    setCustomerQuery("");
+    setCustomerName("");
+    setCustomerMobile("");
+    setCustomerGstin("");
+    setCustomerPan("");
+    setBuyerStateCode("");
+  };
+
+  const filteredCustomers = useMemo(() => {
+    if (!init || !customerQuery.trim() || customerId) return [];
+    const q = customerQuery.trim().toLowerCase();
+    return init.customers
+      .filter((c) => c.cs_customername.toLowerCase().includes(q) || c.cs_customerphone.includes(q))
+      .slice(0, 8);
+  }, [init, customerQuery, customerId]);
+
+  const effectiveGstType = useMemo(() => {
+    if (gstTypeOverride !== "auto") return gstTypeOverride;
+    if (!init) return "intra";
+    const buyer = buyerStateCode.trim();
+    if (!buyer) return "intra";
+    return buyer === init.shop_state_code.trim() ? "intra" : "inter";
+  }, [gstTypeOverride, buyerStateCode, init]);
+
+  const isInterstate = effectiveGstType === "inter";
 
   const totals = useMemo(() => {
-    let taxable = 0, cgst = 0, sgst = 0, igst = 0;
-    for (const l of computedLines) {
-      taxable += l._taxable;
-      if (isInterstate) igst += l._tax;
-      else {
-        cgst += l._tax / 2;
-        sgst += l._tax / 2;
-      }
+    let subtotal = 0;
+    let totalGst = 0;
+    for (const l of cart) {
+      const { taxable, gstAmt } = calcLine(l);
+      subtotal += taxable;
+      totalGst += gstAmt;
     }
-    const preRound = taxable + cgst + sgst + igst;
-    const grand = Math.round(preRound);
-    const roundOff = grand - preRound;
-    return { taxable, cgst, sgst, igst, grand, roundOff };
-  }, [computedLines, isInterstate]);
+    const grandTotal = round2(subtotal + totalGst - (Number(overallDiscount) || 0));
+    const paid = paidAmount === "" ? grandTotal : Number(paidAmount) || 0;
+    const balance = round2(grandTotal - paid);
+    return { subtotal: round2(subtotal), totalGst: round2(totalGst), grandTotal, balance };
+  }, [cart, overallDiscount, paidAmount]);
 
-  const updateLine = (idx, patch) => {
-    setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
-  };
-
-  const addLine = () => setLines((prev) => [...prev, emptyLine(prev.length + 1)]);
-
-  const removeLine = (idx) => {
-    setLines((prev) => {
-      const next = prev.filter((_, i) => i !== idx);
-      return next.map((l, i) => ({ ...l, sr: i + 1 }));
-    });
-  };
-
-  const pickFromCatalog = (idx, catalogId) => {
-    const item = catalog.find((c) => String(c.id) === String(catalogId));
-    if (!item) return;
-    updateLine(idx, {
-      description: item.description,
-      hsn_sac: item.hsn_sac,
-      rate: item.default_rate,
-      gst_rate: item.default_gst_rate,
-    });
-  };
-
-  const handleKeyDown = (e, idx, isLastField) => {
-    // Tab on the last field of the last row adds a new row automatically.
-    if (e.key === "Enter") {
-      e.preventDefault();
-      if (isLastField && idx === lines.length - 1) addLine();
+  const submitQuickAdd = async () => {
+    setError("");
+    try {
+      const product = await quickAddProduct({
+        productname: quickAddForm.productname,
+        hsn: quickAddForm.hsn,
+        unit: quickAddForm.unit,
+        saleprice: Number(quickAddForm.saleprice) || 0,
+      });
+      addProductToCart(product, 1);
+      setQuickAddForm({ productname: "", hsn: "", unit: "pcs", saleprice: "" });
+      setQuickAddOpen(false);
+    } catch (e) {
+      setError(String(e));
     }
   };
 
-  const resetForm = () => {
-    setHeader({
-      invoice_date: todayDdMmYyyy(),
-      buyer_name: "",
-      buyer_address: "",
-      buyer_gstin: "",
-      buyer_state: "Kerala",
-      buyer_state_code: COMPANY_STATE_CODE,
-      transport_name: "",
-      salesman: "",
-    });
-    setLines([emptyLine(1)]);
+  const submitNewCustomer = async () => {
+    setError("");
+    try {
+      const id = await addCustomer({ ...newCustomerForm, balance: 0 });
+      pickCustomer({
+        cs_customerid: id,
+        cs_customername: newCustomerForm.customername,
+        cs_customerphone: newCustomerForm.phone,
+        cs_tin_number: newCustomerForm.tin,
+        cs_statecode: "",
+      });
+      setNewCustomerForm({ customername: "", phone: "", address: "", email: "", tin: "" });
+      setNewCustomerOpen(false);
+      refreshInit();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const resetAfterSale = () => {
+    setCart([]);
+    clearCustomer();
+    setCustomerPan("");
+    setGstTypeOverride("auto");
+    setPaidAmount("");
+    setOverallDiscount(0);
+    setNote("");
+    setTransportName("");
+    setLrNumber("");
+    setLrDate("");
+    setParcels("");
+    setSalesman("");
+    setBooking("");
   };
 
   const submit = async () => {
     setError("");
-    setSuccess("");
-    if (!header.buyer_name.trim()) {
-      setError("Buyer name is required.");
+    setSuccess(null);
+    if (cart.length === 0) {
+      setError("Cart is empty.");
       return;
     }
-    if (lines.length === 0 || lines.every((l) => !l.description.trim())) {
-      setError("Add at least one item.");
-      return;
+    for (const l of cart) {
+      if (!Number(l.qty) || Number(l.qty) <= 0) {
+        setError(`Enter a valid quantity for '${l.name}'.`);
+        return;
+      }
     }
-
+    const paid = paidAmount === "" ? totals.grandTotal : Number(paidAmount) || 0;
     setSaving(true);
     try {
-      const payload = {
-        ...header,
-        items: lines
-          .filter((l) => l.description.trim())
-          .map((l) => ({
-            sr: l.sr,
-            description: l.description,
-            hsn_sac: l.hsn_sac,
-            size_ratio: l.size_ratio,
-            qty: Number(l.qty) || 0,
-            rate: Number(l.rate) || 0,
-            gst_rate: Number(l.gst_rate) || 0,
-            gst_mode: l.gst_mode,
-            amount: 0, // computed server-side
-          })),
-      };
-      const invoice = await createInvoice(payload);
-      setSuccess(
-        `Invoice #${invoice.invoice_number} saved and PDF generated (₹${invoice.grand_total}).`
-      );
-      resetForm();
+      const result = await checkout({
+        items: cart.map((l) => ({
+          product_id: l.product_id,
+          qty: Number(l.qty) || 0,
+          discount_pct: Number(l.discount_pct) || 0,
+          gst_pct: Number(l.gst_pct),
+          gst_mode: l.gst_mode,
+        })),
+        customer_state_code: buyerStateCode.trim(),
+        gst_type_override: gstTypeOverride === "auto" ? null : gstTypeOverride,
+        customer_name: customerName,
+        customer_mobile: customerMobile,
+        customer_id: customerId,
+        pay_method: payMethod,
+        overall_discount: Number(overallDiscount) || 0,
+        paid_amount: paid,
+        note,
+        bill_mode: billMode,
+        transport_name: transportName,
+        lr_number: lrNumber,
+        lr_date: lrDate,
+        parcels,
+        salesman,
+        booking,
+        customer_pan: customerPan,
+        customer_gstin: customerGstin,
+      });
+      setSuccess(result);
+      resetAfterSale();
+      refreshInit();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -196,66 +381,90 @@ export default function Billing() {
     }
   };
 
-  const openLastPdf = async (path) => {
-    try {
-      await openFile(path);
-    } catch (e) {
-      // ignore — user can find it in the output folder
-    }
-  };
+  if (!init) {
+    return <div>Loading…</div>;
+  }
 
   return (
     <div>
-      <h1>New Invoice</h1>
+      <h1>Billing</h1>
       {error && <div className="error-banner">{error}</div>}
-      {success && <div className="success-banner">{success}</div>}
+      {success && (
+        <div className="success-banner">
+          Bill #{success.bill_number} saved — Grand Total ₹{success.grand_total.toFixed(2)}
+          {success.balance > 0.001 ? ` (balance ₹${success.balance.toFixed(2)} on account)` : ""}.{" "}
+          {onCheckoutSuccess && (
+            <button className="secondary" onClick={() => onCheckoutSuccess(success.bill_number)} style={{ marginLeft: 8 }}>
+              Print This Invoice
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="panel">
-        <h2>Buyer Details</h2>
+        <div className="toolbar">
+          <button
+            className={billMode === "retail" ? "primary" : "secondary"}
+            onClick={() => switchBillMode("retail")}
+          >
+            Retail
+          </button>
+          <button
+            className={billMode === "wholesale" ? "primary" : "secondary"}
+            onClick={() => switchBillMode("wholesale")}
+          >
+            Wholesale
+          </button>
+          <div className="muted-note" style={{ marginLeft: "auto" }}>
+            Next bill no. #{init.next_bill_number}
+          </div>
+        </div>
+      </div>
+
+      <div className="panel">
+        <h2>Customer</h2>
         <div className="grid grid-3">
-          <div>
-            <label>Invoice Date</label>
+          <div style={{ position: "relative" }}>
+            <label>Search / Select Customer</label>
             <input
-              value={header.invoice_date}
-              onChange={(e) => setHeader({ ...header, invoice_date: e.target.value })}
-              placeholder="DD/MM/YYYY"
+              value={customerQuery}
+              onChange={(e) => {
+                setCustomerQuery(e.target.value);
+                if (customerId) setCustomerId(null);
+              }}
+              placeholder="Name or phone — leave blank for walk-in"
             />
+            {filteredCustomers.length > 0 && (
+              <div className="search-dropdown">
+                {filteredCustomers.map((c) => (
+                  <div key={c.cs_customerid} className="search-dropdown-item" onClick={() => pickCustomer(c)}>
+                    <strong>{c.cs_customername}</strong>
+                    {c.cs_customerphone && <span className="muted"> · {c.cs_customerphone}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div>
-            <label>Buyer Name *</label>
-            <input
-              value={header.buyer_name}
-              onChange={(e) => setHeader({ ...header, buyer_name: e.target.value })}
-              autoFocus
-            />
+            <label>Customer Name</label>
+            <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Walk-in Customer" />
           </div>
           <div>
-            <label>Buyer GSTIN</label>
-            <input
-              value={header.buyer_gstin}
-              onChange={(e) => setHeader({ ...header, buyer_gstin: e.target.value })}
-            />
+            <label>Mobile</label>
+            <input value={customerMobile} onChange={(e) => setCustomerMobile(e.target.value)} />
           </div>
-          <div style={{ gridColumn: "span 2" }}>
-            <label>Buyer Address</label>
-            <input
-              value={header.buyer_address}
-              onChange={(e) => setHeader({ ...header, buyer_address: e.target.value })}
-            />
+          <div>
+            <label>GSTIN</label>
+            <input value={customerGstin} onChange={(e) => setCustomerGstin(e.target.value)} />
+          </div>
+          <div>
+            <label>PAN</label>
+            <input value={customerPan} onChange={(e) => setCustomerPan(e.target.value)} />
           </div>
           <div>
             <label>Buyer State</label>
-            <select
-              value={header.buyer_state_code}
-              onChange={(e) => {
-                const st = INDIAN_STATES.find((s) => s.code === e.target.value);
-                setHeader({
-                  ...header,
-                  buyer_state_code: e.target.value,
-                  buyer_state: st ? st.name : "",
-                });
-              }}
-            >
+            <select value={buyerStateCode} onChange={(e) => setBuyerStateCode(e.target.value)}>
+              <option value="">— not set —</option>
               {INDIAN_STATES.map((s) => (
                 <option key={s.code} value={s.code}>
                   {s.name} ({s.code})
@@ -264,184 +473,379 @@ export default function Billing() {
             </select>
           </div>
           <div>
-            <label>Transport Name</label>
-            <input
-              value={header.transport_name}
-              onChange={(e) => setHeader({ ...header, transport_name: e.target.value })}
-            />
-          </div>
-          <div>
-            <label>Salesman</label>
-            <input
-              value={header.salesman}
-              onChange={(e) => setHeader({ ...header, salesman: e.target.value })}
-            />
+            <label>GST Type</label>
+            <select value={gstTypeOverride} onChange={(e) => setGstTypeOverride(e.target.value)}>
+              <option value="auto">Auto ({isInterstate ? "Interstate" : "Intrastate"})</option>
+              <option value="intra">Force Intrastate (CGST+SGST)</option>
+              <option value="inter">Force Interstate (IGST)</option>
+            </select>
           </div>
         </div>
-        <div className="muted-note">
-          {isInterstate
-            ? "Inter-state buyer → IGST will be applied."
-            : "Intra-state buyer (Kerala) → CGST + SGST will be applied."}
+        <div style={{ marginTop: 8 }}>
+          {customerId ? (
+            <button className="icon-btn" onClick={clearCustomer}>
+              ✕ Clear selected customer (switch to walk-in)
+            </button>
+          ) : (
+            <button className="icon-btn" onClick={() => setNewCustomerOpen((o) => !o)}>
+              + New Customer
+            </button>
+          )}
         </div>
+        {newCustomerOpen && !customerId && (
+          <div className="grid grid-3" style={{ marginTop: 10, borderTop: "1px solid var(--border)", paddingTop: 10 }}>
+            <div>
+              <label>Name *</label>
+              <input
+                value={newCustomerForm.customername}
+                onChange={(e) => setNewCustomerForm({ ...newCustomerForm, customername: e.target.value })}
+              />
+            </div>
+            <div>
+              <label>Phone</label>
+              <input
+                value={newCustomerForm.phone}
+                onChange={(e) => setNewCustomerForm({ ...newCustomerForm, phone: e.target.value })}
+              />
+            </div>
+            <div>
+              <label>TIN/GSTIN</label>
+              <input
+                value={newCustomerForm.tin}
+                onChange={(e) => setNewCustomerForm({ ...newCustomerForm, tin: e.target.value })}
+              />
+            </div>
+            <div style={{ gridColumn: "span 2" }}>
+              <label>Address</label>
+              <input
+                value={newCustomerForm.address}
+                onChange={(e) => setNewCustomerForm({ ...newCustomerForm, address: e.target.value })}
+              />
+            </div>
+            <div>
+              <label>Email</label>
+              <input
+                value={newCustomerForm.email}
+                onChange={(e) => setNewCustomerForm({ ...newCustomerForm, email: e.target.value })}
+              />
+            </div>
+            <div style={{ gridColumn: "span 3" }}>
+              <button className="primary" onClick={submitNewCustomer}>
+                Save Customer
+              </button>
+              <div className="muted-note">
+                Note: new customers have no state code on file yet — set Buyer State above manually for this bill.
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="panel">
-        <h2>Items</h2>
-        <table className="items-table">
-          <thead>
-            <tr>
-              <th style={{ width: 30 }}>Sr</th>
-              <th>Catalog</th>
-              <th>Description</th>
-              <th style={{ width: 70 }}>HSN</th>
-              <th style={{ width: 120 }}>Size/Ratio</th>
-              <th style={{ width: 60 }}>Qty (auto)</th>
-              <th style={{ width: 80 }}>Rate</th>
-              <th style={{ width: 80 }}>GST%</th>
-              <th style={{ width: 90 }}>Mode</th>
-              <th style={{ width: 80 }}>Amount</th>
-              <th style={{ width: 30 }}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {computedLines.map((l, idx) => (
-              <tr key={idx}>
-                <td>{l.sr}</td>
-                <td>
-                  <select onChange={(e) => pickFromCatalog(idx, e.target.value)} defaultValue="">
-                    <option value="" disabled>
-                      pick…
-                    </option>
-                    {catalog.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.description}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td>
-                  <input
-                    value={l.description}
-                    onChange={(e) => updateLine(idx, { description: e.target.value })}
-                  />
-                </td>
-                <td>
-                  <input
-                    value={l.hsn_sac}
-                    onChange={(e) => updateLine(idx, { hsn_sac: e.target.value })}
-                  />
-                </td>
-                <td>
-                  <input
-                    value={l.size_ratio}
-                    placeholder="A/32/6, B/34/12, D/36/12"
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      const computedQty = sumQtyFromSizeRatio(value);
-                      updateLine(idx, {
-                        size_ratio: value,
-                        ...(computedQty !== null ? { qty: computedQty } : {}),
-                      });
-                    }}
-                  />
-                </td>
-                <td>
-                  <input
-                    type="number"
-                    value={l.qty}
-                    onChange={(e) => updateLine(idx, { qty: e.target.value })}
-                  />
-                </td>
-                <td>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={l.rate}
-                    onChange={(e) => updateLine(idx, { rate: e.target.value })}
-                  />
-                </td>
-                <td>
-                  <select
-                    value={l.gst_rate}
-                    onChange={(e) => updateLine(idx, { gst_rate: e.target.value })}
-                  >
-                    {GST_RATES.map((r) => (
-                      <option key={r} value={r}>
-                        {r}%
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td>
-                  <select
-                    value={l.gst_mode}
-                    onChange={(e) => updateLine(idx, { gst_mode: e.target.value })}
-                  >
-                    <option value="exclusive">Exclusive</option>
-                    <option value="inclusive">Inclusive</option>
-                  </select>
-                </td>
-                <td>{l._taxable.toFixed(2)}</td>
-                <td>
-                  <button className="icon-btn" onClick={() => removeLine(idx)} title="Remove row">
-                    ✕
+        <h2>Add Items</h2>
+        <div style={{ position: "relative" }}>
+          <label>Search Products (code, name, or model)</label>
+          <input value={productQuery} onChange={(e) => setProductQuery(e.target.value)} placeholder="Type to search…" />
+          {productResults.length > 0 && (
+            <div className="search-dropdown">
+              {productResults.map((p) => (
+                <div key={p.pr_productid} className="search-dropdown-item">
+                  <div>
+                    <strong>{p.pr_productname}</strong>
+                    {(p.pr_model || p.pr_cupsize || p.pr_size) && (
+                      <span className="muted"> ({[p.pr_model, p.pr_cupsize, p.pr_size].filter(Boolean).join("/")})</span>
+                    )}
+                    <span className="muted"> · stock {p.pr_stock}</span>
+                  </div>
+                  <button className="secondary" onClick={() => addProductToCart(p, 1)}>
+                    Add
                   </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="muted-note" style={{ marginBottom: 8 }}>
-          Size/Ratio format: <code>CUP/BAND/QTY</code> per size, comma-separated — e.g.{" "}
-          <code>A/32/6, B/34/12, D/36/12</code> auto-fills Qty as 6+12+12 = <strong>30</strong>.
-          Cup letter is optional (<code>32/12</code> also works). You can still overwrite the
-          Qty field by hand if a row needs a different total.
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-        <div style={{ marginTop: 10 }}>
-          <button className="secondary" onClick={addLine}>
-            + Add Item
-          </button>
+
+        {billMode === "retail" && (
+          <div style={{ marginTop: 8 }}>
+            <button className="icon-btn" onClick={() => setQuickAddOpen((o) => !o)}>
+              + Quick-Add New Product
+            </button>
+          </div>
+        )}
+        {quickAddOpen && billMode === "retail" && (
+          <div className="grid grid-4" style={{ marginTop: 10, borderTop: "1px solid var(--border)", paddingTop: 10 }}>
+            <div>
+              <label>Name *</label>
+              <input
+                value={quickAddForm.productname}
+                onChange={(e) => setQuickAddForm({ ...quickAddForm, productname: e.target.value })}
+              />
+            </div>
+            <div>
+              <label>HSN</label>
+              <input value={quickAddForm.hsn} onChange={(e) => setQuickAddForm({ ...quickAddForm, hsn: e.target.value })} />
+            </div>
+            <div>
+              <label>Unit</label>
+              <input value={quickAddForm.unit} onChange={(e) => setQuickAddForm({ ...quickAddForm, unit: e.target.value })} />
+            </div>
+            <div>
+              <label>Sale Price *</label>
+              <input
+                type="number"
+                step="0.01"
+                value={quickAddForm.saleprice}
+                onChange={(e) => setQuickAddForm({ ...quickAddForm, saleprice: e.target.value })}
+              />
+            </div>
+            <div style={{ gridColumn: "span 4" }}>
+              <button className="primary" onClick={submitQuickAdd}>
+                Add to Cart
+              </button>
+              <div className="muted-note">
+                Stock is seeded at 1 and purchase price at 0 — edit properly on the Products screen later if this becomes a
+                recurring item.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {billMode === "wholesale" && (
+          <div style={{ marginTop: 16, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+            <h2 style={{ marginTop: 0 }}>Add Whole Style (all sizes)</h2>
+            <div style={{ position: "relative", maxWidth: 340 }}>
+              <label>Search by Model</label>
+              <input value={styleQuery} onChange={(e) => setStyleQuery(e.target.value)} placeholder="e.g. Sajna" />
+              {styleMatches.length > 0 && (
+                <div className="search-dropdown">
+                  {styleMatches.map((m) => (
+                    <div key={m} className="search-dropdown-item" onClick={() => pickModel(m)}>
+                      {m}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            {selectedModel && variants.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Cupsize</th>
+                      <th>Size</th>
+                      <th className="text-end">Stock</th>
+                      <th className="text-end">Wholesale Price</th>
+                      <th className="text-end">Qty</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {variants.map((v) => (
+                      <tr key={v.pr_productid}>
+                        <td>{v.pr_cupsize || "—"}</td>
+                        <td>{v.pr_size}</td>
+                        <td className="text-end">{v.pr_stock}</td>
+                        <td className="text-end">{v.pr_wholesale || "—"}</td>
+                        <td className="text-end" style={{ width: 90 }}>
+                          <input
+                            type="number"
+                            min="0"
+                            value={variantQtys[v.pr_productid] || ""}
+                            onChange={(e) => setVariantQtys({ ...variantQtys, [v.pr_productid]: e.target.value })}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <button className="secondary" style={{ marginTop: 8 }} onClick={addSelectedVariants}>
+                  Add Selected Sizes to Cart
+                </button>
+              </div>
+            )}
+            {selectedModel && variants.length === 0 && (
+              <div className="muted-note">No in-stock variants found for '{selectedModel}'.</div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <h2>Cart</h2>
+        {cart.length === 0 ? (
+          <div className="muted-note">No items yet — search above to add products.</div>
+        ) : (
+          <table className="items-table">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th style={{ width: 70 }}>Qty</th>
+                <th style={{ width: 90 }}>Rate</th>
+                <th style={{ width: 80 }}>Disc %</th>
+                <th style={{ width: 90 }}>GST %</th>
+                <th style={{ width: 100 }}>GST Mode</th>
+                <th style={{ width: 90 }}>Amount</th>
+                <th style={{ width: 30 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {cart.map((l) => {
+                const { lineTotal } = calcLine(l);
+                return (
+                  <tr key={l.key}>
+                    <td>
+                      {l.name}
+                      {(l.model || l.cupsize || l.size) && (
+                        <div className="muted-note">{[l.model, l.cupsize, l.size].filter(Boolean).join("/")}</div>
+                      )}
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min="0"
+                        value={l.qty}
+                        onChange={(e) => updateCartLine(l.key, { qty: e.target.value })}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={l.price}
+                        onChange={(e) => updateCartLine(l.key, { price: e.target.value })}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={l.discount_pct}
+                        onChange={(e) => updateCartLine(l.key, { discount_pct: e.target.value })}
+                      />
+                    </td>
+                    <td>
+                      <select value={l.gst_pct} onChange={(e) => updateCartLine(l.key, { gst_pct: Number(e.target.value) })}>
+                        {GST_RATES.map((r) => (
+                          <option key={r} value={r}>
+                            {r}%
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <select value={l.gst_mode} onChange={(e) => updateCartLine(l.key, { gst_mode: e.target.value })}>
+                        <option value="exclusive">Exclusive</option>
+                        <option value="inclusive">Inclusive</option>
+                      </select>
+                    </td>
+                    <td className="text-end">{lineTotal.toFixed(2)}</td>
+                    <td>
+                      <button className="icon-btn" onClick={() => removeCartLine(l.key)} title="Remove">
+                        ✕
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+
+        <div className="grid grid-3" style={{ marginTop: 14 }}>
+          <div>
+            <label>Overall Discount (₹)</label>
+            <input
+              type="number"
+              step="0.01"
+              value={overallDiscount}
+              onChange={(e) => setOverallDiscount(e.target.value)}
+            />
+          </div>
+          <div>
+            <label>Paid Amount (₹)</label>
+            <input
+              type="number"
+              step="0.01"
+              value={paidAmount}
+              placeholder={totals.grandTotal.toFixed(2)}
+              onChange={(e) => setPaidAmount(e.target.value)}
+            />
+          </div>
+          <div>
+            <label>Pay Method</label>
+            <select value={payMethod} onChange={(e) => setPayMethod(e.target.value)}>
+              <option value="Cash">Cash</option>
+              <option value="Card">Card</option>
+              <option value="UPI">UPI</option>
+              <option value="Credit">Credit (on account)</option>
+            </select>
+          </div>
         </div>
 
         <div className="totals-box">
           <div className="totals-row">
-            <span>Taxable Total</span>
-            <span>₹{totals.taxable.toFixed(2)}</span>
+            <span>Subtotal</span>
+            <span>₹{totals.subtotal.toFixed(2)}</span>
           </div>
-          {isInterstate ? (
-            <div className="totals-row">
-              <span>IGST</span>
-              <span>₹{totals.igst.toFixed(2)}</span>
-            </div>
-          ) : (
-            <>
-              <div className="totals-row">
-                <span>CGST</span>
-                <span>₹{totals.cgst.toFixed(2)}</span>
-              </div>
-              <div className="totals-row">
-                <span>SGST</span>
-                <span>₹{totals.sgst.toFixed(2)}</span>
-              </div>
-            </>
-          )}
           <div className="totals-row">
-            <span>Round Off</span>
-            <span>₹{totals.roundOff.toFixed(2)}</span>
+            <span>{isInterstate ? "IGST" : "CGST + SGST"}</span>
+            <span>₹{totals.totalGst.toFixed(2)}</span>
           </div>
           <div className="totals-row grand">
             <span>Grand Total</span>
-            <span>₹{totals.grand.toFixed(2)}</span>
+            <span>₹{totals.grandTotal.toFixed(2)}</span>
+          </div>
+          {totals.balance > 0.001 && (
+            <div className="totals-row">
+              <span>Balance (on account)</span>
+              <span>₹{totals.balance.toFixed(2)}</span>
+            </div>
+          )}
+        </div>
+        {totals.balance > 0.001 && !customerId && (
+          <div className="muted-note">
+            This bill won't be fully paid — select or add a customer above so the balance can be tracked.
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <h2>Transport &amp; Notes (optional)</h2>
+        <div className="grid grid-4">
+          <div>
+            <label>Transport Name</label>
+            <input value={transportName} onChange={(e) => setTransportName(e.target.value)} />
+          </div>
+          <div>
+            <label>LR Number</label>
+            <input value={lrNumber} onChange={(e) => setLrNumber(e.target.value)} />
+          </div>
+          <div>
+            <label>LR Date</label>
+            <input value={lrDate} onChange={(e) => setLrDate(e.target.value)} placeholder="DD/MM/YYYY" />
+          </div>
+          <div>
+            <label>Parcels</label>
+            <input value={parcels} onChange={(e) => setParcels(e.target.value)} />
+          </div>
+          <div>
+            <label>Salesman</label>
+            <input value={salesman} onChange={(e) => setSalesman(e.target.value)} />
+          </div>
+          <div>
+            <label>Booking</label>
+            <input value={booking} onChange={(e) => setBooking(e.target.value)} />
+          </div>
+          <div style={{ gridColumn: "span 2" }}>
+            <label>Note</label>
+            <input value={note} onChange={(e) => setNote(e.target.value)} />
           </div>
         </div>
       </div>
 
       <div className="toolbar">
-        <button className="primary" onClick={submit} disabled={saving}>
-          {saving ? "Saving…" : "Save & Generate PDF"}
-        </button>
-        <button className="secondary" onClick={resetForm} disabled={saving}>
-          Clear
+        <button className="primary" onClick={submit} disabled={saving || cart.length === 0}>
+          {saving ? "Saving…" : "Checkout & Save Bill"}
         </button>
       </div>
     </div>

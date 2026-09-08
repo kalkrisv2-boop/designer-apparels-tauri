@@ -1,6 +1,7 @@
 // Prevents additional console window on Windows in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod accounts;
 mod auth;
 mod billing;
 mod config;
@@ -279,6 +280,10 @@ fn main() {
             billing::checkout,
             invoices::find_bill_by_number,
             invoices::get_invoice_data,
+            accounts::accounts_init,
+            accounts::add_voucher,
+            accounts::list_ledger,
+            accounts::list_daybook,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

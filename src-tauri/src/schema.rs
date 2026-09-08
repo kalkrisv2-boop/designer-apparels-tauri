@@ -49,6 +49,13 @@ const SCHEMA_MIGRATIONS: &[(&str, &str, &str)] = &[
     ("vm_shopprofile", "sp_terms", "TEXT DEFAULT ''"),
     ("vm_products", "pr_cupsize", "TEXT DEFAULT ''"),
     ("vm_products", "pr_description", "TEXT DEFAULT ''"),
+    // Phase 2 (Accounts): per-shop chart of accounts. Python's
+    // administrator_account_name was shared across all installs (each
+    // shop had its own separate app install, so no column was needed);
+    // confirmed decision for the multi-shop platform is each shop gets
+    // its own list, so this mirrors vm_transaction.user_id (INTEGER),
+    // not the table's existing-but-unused `acnt_branch` TEXT column.
+    ("administrator_account_name", "user_id", "INTEGER NOT NULL DEFAULT 0"),
     // Append new (table, column, type+default) tuples here as later
     // phases add columns to tables that already shipped -- never edit
     // or remove an existing entry, that would break upgrades for shops

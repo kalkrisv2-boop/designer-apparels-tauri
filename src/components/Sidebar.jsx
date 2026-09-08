@@ -4,9 +4,16 @@ import { invoke } from "@tauri-apps/api/core";
 // Ported from templates/sidebar.html. Nav items are gated by
 // session.shop_type exactly like the Jinja {% if current_shop_type == ... %}
 // branches in the Python template. Only "designer_apparels" has real
-// pages wired up in this app so far (Billing/History/Items, carried over
-// from the standalone invoicing tool -- see roadmap Phase 1 for
-// reconciling them with the ported vm_billentry schema). The other four
+// pages wired up in this app so far. Invoice History/Item Catalog are
+// carried over from the standalone invoicing tool and marked "(legacy)"
+// -- they still run against the old single-tenant `invoices`/
+// `catalog_items` tables (Db), not the ported vm_billentry/vm_products
+// platform schema. Billing/Products/Customers/Suppliers/Print-Reprint-
+// Invoice/Accounts are the Phase 1+2 replacements built against the new
+// schema -- Billing.jsx now writes through billing::checkout() to
+// vm_billentry (which itself auto-posts to Accounts on a cash sale, see
+// accounts.rs), so the legacy History/Items pair can be retired once
+// nothing depends on the old `invoices` table anymore. The other four
 // verticals show a "coming soon" placeholder until their own Phase
 // (3/4/5/6) lands, same as Python's routes/placeholder.py did before
 // each vertical was built out.
@@ -22,11 +29,13 @@ export default function Sidebar({ session, multiShopEnabled, tab, onTab, onLogou
   const designerApparelsNav = [
     { id: "dashboard", label: "Dashboard" },
     { id: "billing", label: "Billing" },
-    { id: "history", label: "Print Invoice / History" },
+    { id: "history", label: "Invoice History (legacy)" },
     { id: "items", label: "Item Catalog (legacy)" },
     { id: "products", label: "Products & Inventory" },
     { id: "customers", label: "Customers" },
     { id: "suppliers", label: "Suppliers" },
+    { id: "invoice-print", label: "Print / Reprint Invoice" },
+    { id: "accounts", label: "Accounts (Vouchers/Ledger/Daybook)" },
     { id: "settings", label: "Settings" },
   ];
 
