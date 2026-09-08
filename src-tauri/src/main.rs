@@ -2,19 +2,24 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod auth;
+mod billing;
 mod config;
+mod customers;
 mod dashboard;
 mod db;
+mod invoices;
 mod licensing;
 mod licensing_commands;
 mod models;
 mod paths;
 mod pdf;
 mod platform_db;
+mod products;
 mod schema;
 mod session;
 mod shop_guard;
 mod shops;
+mod suppliers;
 mod words;
 
 use db::Db;
@@ -206,7 +211,7 @@ fn regenerate_invoice_pdf(db: State<Db>, invoice_id: i64) -> Result<String, Stri
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let app_data_dir = app
                 .path()
@@ -255,6 +260,25 @@ fn main() {
             shops::switch_shop,
             dashboard::get_dashboard,
             config::get_client_config,
+            products::list_products,
+            products::add_product,
+            products::update_product,
+            products::delete_product,
+            products::search_products,
+            products::style_variants,
+            products::quick_add_product,
+            customers::list_customers,
+            customers::add_customer,
+            customers::update_customer,
+            customers::delete_customer,
+            suppliers::list_suppliers,
+            suppliers::add_supplier,
+            suppliers::update_supplier,
+            suppliers::delete_supplier,
+            billing::billing_init,
+            billing::checkout,
+            invoices::find_bill_by_number,
+            invoices::get_invoice_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

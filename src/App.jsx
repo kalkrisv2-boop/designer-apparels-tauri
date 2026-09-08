@@ -3,6 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import Billing from "./pages/Billing.jsx";
 import History from "./pages/History.jsx";
 import Items from "./pages/Items.jsx";
+import Products from "./pages/Products.jsx";
+import Customers from "./pages/Customers.jsx";
+import Suppliers from "./pages/Suppliers.jsx";
 import Settings from "./pages/Settings.jsx";
 import Activate from "./pages/Activate.jsx";
 import Login from "./pages/Login.jsx";
@@ -116,6 +119,9 @@ export default function App() {
               {tab === "billing" && <Billing />}
               {tab === "history" && <History />}
               {tab === "items" && <Items />}
+              {tab === "products" && <Products />}
+              {tab === "customers" && <Customers />}
+              {tab === "suppliers" && <Suppliers />}
               {tab === "settings" && <Settings />}
             </>
           )}

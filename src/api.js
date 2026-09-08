@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { open as openPath } from "@tauri-apps/plugin-shell";
+import { openPath } from "@tauri-apps/plugin-opener";
 
 // ---- Settings ----
 export const getSettings = () => invoke("get_settings");
@@ -17,6 +17,27 @@ export const getInvoice = (id) => invoke("get_invoice", { id });
 export const createInvoice = (input) => invoke("create_invoice", { input });
 export const regenerateInvoicePdf = (invoiceId) =>
   invoke("regenerate_invoice_pdf", { invoiceId });
+
+// ---- Products (Phase 1, vm_products via platform_db) ----
+export const listProducts = () => invoke("list_products");
+export const addProduct = (input) => invoke("add_product", { input });
+export const updateProduct = (productId, input) => invoke("update_product", { productId, input });
+export const deleteProduct = (productId) => invoke("delete_product", { productId });
+export const searchProducts = (q) => invoke("search_products", { q });
+export const styleVariants = (model) => invoke("style_variants", { model });
+export const quickAddProduct = (input) => invoke("quick_add_product", { input });
+
+// ---- Customers (Phase 1, vm_customer via platform_db) ----
+export const listCustomers = () => invoke("list_customers");
+export const addCustomer = (input) => invoke("add_customer", { input });
+export const updateCustomer = (customerId, input) => invoke("update_customer", { customerId, input });
+export const deleteCustomer = (customerId) => invoke("delete_customer", { customerId });
+
+// ---- Suppliers (Phase 1, vm_supplier via platform_db) ----
+export const listSuppliers = () => invoke("list_suppliers");
+export const addSupplier = (input) => invoke("add_supplier", { input });
+export const updateSupplier = (supplierId, input) => invoke("update_supplier", { supplierId, input });
+export const deleteSupplier = (supplierId) => invoke("delete_supplier", { supplierId });
 
 // ---- Native folder picker (for Settings > PDF output folder) ----
 export const pickFolder = async () => {

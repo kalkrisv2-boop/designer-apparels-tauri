@@ -47,6 +47,8 @@ const SCHEMA_MIGRATIONS: &[(&str, &str, &str)] = &[
     ("vm_attendanceitems", "user_id", "TEXT DEFAULT ''"),
     ("vm_shopprofile", "sp_tagline", "TEXT DEFAULT ''"),
     ("vm_shopprofile", "sp_terms", "TEXT DEFAULT ''"),
+    ("vm_products", "pr_cupsize", "TEXT DEFAULT ''"),
+    ("vm_products", "pr_description", "TEXT DEFAULT ''"),
     // Append new (table, column, type+default) tuples here as later
     // phases add columns to tables that already shipped -- never edit
     // or remove an existing entry, that would break upgrades for shops

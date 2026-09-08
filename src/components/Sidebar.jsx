@@ -23,7 +23,10 @@ export default function Sidebar({ session, multiShopEnabled, tab, onTab, onLogou
     { id: "dashboard", label: "Dashboard" },
     { id: "billing", label: "Billing" },
     { id: "history", label: "Print Invoice / History" },
-    { id: "items", label: "Products / Stock" },
+    { id: "items", label: "Item Catalog (legacy)" },
+    { id: "products", label: "Products & Inventory" },
+    { id: "customers", label: "Customers" },
+    { id: "suppliers", label: "Suppliers" },
     { id: "settings", label: "Settings" },
   ];
 
