@@ -16,6 +16,8 @@ mod paths;
 mod pdf;
 mod platform_db;
 mod products;
+mod purchases;
+mod sales_returns;
 mod schema;
 mod session;
 mod shop_guard;
@@ -284,6 +286,16 @@ fn main() {
             accounts::add_voucher,
             accounts::list_ledger,
             accounts::list_daybook,
+            purchases::purchases_init,
+            purchases::purchases_search_products,
+            purchases::purchases_checkout,
+            purchases::purchase_returns_init,
+            purchases::purchases_search_products_for_return,
+            purchases::purchase_returns_checkout,
+            sales_returns::sales_returns_init,
+            sales_returns::sales_returns_search_products,
+            sales_returns::sales_returns_lookup_bill,
+            sales_returns::sales_returns_checkout,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

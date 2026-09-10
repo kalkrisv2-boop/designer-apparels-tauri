@@ -4,6 +4,9 @@ import Billing from "./pages/Billing.jsx";
 import History from "./pages/History.jsx";
 import InvoicePrint from "./pages/InvoicePrint.jsx";
 import Accounts from "./pages/Accounts.jsx";
+import Purchases from "./pages/Purchases.jsx";
+import PurchaseReturns from "./pages/PurchaseReturns.jsx";
+import SalesReturns from "./pages/SalesReturns.jsx";
 import Items from "./pages/Items.jsx";
 import Products from "./pages/Products.jsx";
 import Customers from "./pages/Customers.jsx";
@@ -135,6 +138,9 @@ export default function App() {
                 />
               )}
               {tab === "accounts" && <Accounts />}
+              {tab === "purchases" && <Purchases />}
+              {tab === "purchase-returns" && <PurchaseReturns />}
+              {tab === "sales-returns" && <SalesReturns />}
               {tab === "items" && <Items />}
               {tab === "products" && <Products />}
               {tab === "customers" && <Customers />}

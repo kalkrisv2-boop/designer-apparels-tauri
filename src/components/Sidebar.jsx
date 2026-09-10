@@ -13,10 +13,11 @@ import { invoke } from "@tauri-apps/api/core";
 // schema -- Billing.jsx now writes through billing::checkout() to
 // vm_billentry (which itself auto-posts to Accounts on a cash sale, see
 // accounts.rs), so the legacy History/Items pair can be retired once
-// nothing depends on the old `invoices` table anymore. The other four
-// verticals show a "coming soon" placeholder until their own Phase
-// (3/4/5/6) lands, same as Python's routes/placeholder.py did before
-// each vertical was built out.
+// nothing depends on the old `invoices` table anymore. Purchases.jsx/
+// PurchaseReturns.jsx are Phase 3 (routes/purchases.py); SalesReturns.jsx
+// is Phase 4 (routes/sales_returns.py). Reports, Estimation, and Barcode
+// are still future phases, same as Python's routes/placeholder.py did
+// before each vertical was built out.
 export default function Sidebar({ session, multiShopEnabled, tab, onTab, onLogout, onSwitchShop }) {
   const [shops, setShops] = useState([]);
 
@@ -36,6 +37,9 @@ export default function Sidebar({ session, multiShopEnabled, tab, onTab, onLogou
     { id: "suppliers", label: "Suppliers" },
     { id: "invoice-print", label: "Print / Reprint Invoice" },
     { id: "accounts", label: "Accounts (Vouchers/Ledger/Daybook)" },
+    { id: "purchases", label: "Purchases" },
+    { id: "purchase-returns", label: "Purchase Returns" },
+    { id: "sales-returns", label: "Sales Returns" },
     { id: "settings", label: "Settings" },
   ];
 

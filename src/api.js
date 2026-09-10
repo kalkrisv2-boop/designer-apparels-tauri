@@ -53,6 +53,22 @@ export const addVoucher = (input) => invoke("add_voucher", { input });
 export const listLedger = (dateFrom, dateTo) => invoke("list_ledger", { dateFrom, dateTo });
 export const listDaybook = (dateFrom, dateTo) => invoke("list_daybook", { dateFrom, dateTo });
 
+// ---- Purchases: stock IN (Phase 3, writes vm_purentry/vm_puritems) ----
+export const purchasesInit = () => invoke("purchases_init");
+export const purchasesSearchProducts = (q) => invoke("purchases_search_products", { q });
+export const purchasesCheckout = (input) => invoke("purchases_checkout", { input });
+
+// ---- Purchase Returns: stock OUT (Phase 3, writes vm_purreturnentry/vm_purreturnitem) ----
+export const purchaseReturnsInit = () => invoke("purchase_returns_init");
+export const purchasesSearchProductsForReturn = (q) => invoke("purchases_search_products_for_return", { q });
+export const purchaseReturnsCheckout = (input) => invoke("purchase_returns_checkout", { input });
+
+// ---- Sales Returns: customer credit notes/refunds (Phase 4, writes vm_salreturnentry/vm_salreturnitem) ----
+export const salesReturnsInit = () => invoke("sales_returns_init");
+export const salesReturnsSearchProducts = (q) => invoke("sales_returns_search_products", { q });
+export const salesReturnsLookupBill = (billNumber) => invoke("sales_returns_lookup_bill", { billNumber });
+export const salesReturnsCheckout = (input) => invoke("sales_returns_checkout", { input });
+
 // ---- Native folder picker (for Settings > PDF output folder) ----
 export const pickFolder = async () => {
   const selected = await openDialog({ directory: true, multiple: false });
