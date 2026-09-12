@@ -17,6 +17,7 @@ mod pdf;
 mod platform_db;
 mod products;
 mod purchases;
+mod reports;
 mod sales_returns;
 mod schema;
 mod session;
@@ -296,6 +297,10 @@ fn main() {
             sales_returns::sales_returns_search_products,
             sales_returns::sales_returns_lookup_bill,
             sales_returns::sales_returns_checkout,
+            reports::gst_report,
+            reports::gstr1_export,
+            reports::profit_report,
+            reports::customer_report,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

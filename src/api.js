@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 
 // ---- Settings ----
@@ -68,6 +68,37 @@ export const salesReturnsInit = () => invoke("sales_returns_init");
 export const salesReturnsSearchProducts = (q) => invoke("sales_returns_search_products", { q });
 export const salesReturnsLookupBill = (billNumber) => invoke("sales_returns_lookup_bill", { billNumber });
 export const salesReturnsCheckout = (input) => invoke("sales_returns_checkout", { input });
+
+// ---- Reports (Phase 5, read-only against vm_billitems/vm_billentry/vm_customer/vm_salreturnentry/vm_transaction) ----
+export const gstReport = (dateFrom, dateTo) =>
+  invoke("gst_report", { dateFrom: dateFrom || undefined, dateTo: dateTo || undefined });
+export const profitReport = (dateFrom, dateTo) =>
+  invoke("profit_report", { dateFrom: dateFrom || undefined, dateTo: dateTo || undefined });
+export const customerReport = (dateFrom, dateTo, customerId) =>
+  invoke("customer_report", {
+    dateFrom: dateFrom || undefined,
+    dateTo: dateTo || undefined,
+    customerId: customerId || undefined,
+  });
+
+// GSTR-1 export needs a real file path up front (Rust writes the zip
+// directly to disk, there's no "download" concept in a desktop app) --
+// so this wraps the native save dialog + the invoke into one call.
+// Returns null if the user cancelled the dialog.
+export const exportGstr1 = async (dateFrom, dateTo) => {
+  const suggestedName = `GSTR1_${dateFrom || "all"}_to_${dateTo || "all"}.zip`;
+  const savePath = await saveDialog({
+    defaultPath: suggestedName,
+    filters: [{ name: "Zip Archive", extensions: ["zip"] }],
+  });
+  if (!savePath) return null;
+  const summary = await invoke("gstr1_export", {
+    dateFrom: dateFrom || undefined,
+    dateTo: dateTo || undefined,
+    savePath,
+  });
+  return { ...summary, savePath };
+};
 
 // ---- Native folder picker (for Settings > PDF output folder) ----
 export const pickFolder = async () => {

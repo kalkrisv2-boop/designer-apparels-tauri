@@ -26,6 +26,10 @@ hmac = "0.12"
 sha2 = "0.10"
 mac_address = "1.1"
 bcrypt = "0.15"
+# Phase 5: GSTR-1 export writes a zip of CSVs. Deflate-only (no bzip2/
+# lzma/zstd/aes) to keep the added compile surface minimal -- this app
+# never reads third-party zips, only writes plain CSV-in-zip.
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

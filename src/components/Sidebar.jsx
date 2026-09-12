@@ -15,9 +15,11 @@ import { invoke } from "@tauri-apps/api/core";
 // accounts.rs), so the legacy History/Items pair can be retired once
 // nothing depends on the old `invoices` table anymore. Purchases.jsx/
 // PurchaseReturns.jsx are Phase 3 (routes/purchases.py); SalesReturns.jsx
-// is Phase 4 (routes/sales_returns.py). Reports, Estimation, and Barcode
-// are still future phases, same as Python's routes/placeholder.py did
-// before each vertical was built out.
+// is Phase 4 (routes/sales_returns.py). Reports.jsx is Phase 5
+// (routes/reports.py), read-only against the tables Billing/Purchases/
+// Sales Returns write to. Estimation and Barcode are still future
+// phases, same as Python's routes/placeholder.py did before each
+// vertical was built out.
 export default function Sidebar({ session, multiShopEnabled, tab, onTab, onLogout, onSwitchShop }) {
   const [shops, setShops] = useState([]);
 
@@ -40,6 +42,7 @@ export default function Sidebar({ session, multiShopEnabled, tab, onTab, onLogou
     { id: "purchases", label: "Purchases" },
     { id: "purchase-returns", label: "Purchase Returns" },
     { id: "sales-returns", label: "Sales Returns" },
+    { id: "reports", label: "Reports" },
     { id: "settings", label: "Settings" },
   ];
 
